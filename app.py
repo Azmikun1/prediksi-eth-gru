@@ -86,72 +86,102 @@ html, body, [class*="css"]  { font-family: "Inter", "DejaVu Sans", sans-serif; }
 @st.cache_data(ttl="1h") 
 def load_eth_data():
     """
-    Versi 'Anti-Ribet'. Memaksa data menjadi format standar
-    supaya tidak lari ke backup terus.
+    Versi 'Bulletproof' (Anti-Gagal).
+    Memaksa kolom pertama jadi Date dan mencari kolom Close secara agresif.
     """
     ticker = "ETH-USD"
     df = None
     
-    # --- LANGKAH 1: DOWNLOAD ---
+    # --- LANGKAH 1: DOWNLOAD ONLINE ---
     try:
-        # Kita pakai auto_adjust=True agar kolom lebih bersih
+        # Hapus parameter 'multi_level_index' karena kadang bikin error di versi lama.
+        # Kita pakai auto_adjust=False biar aman, nanti kita pilih sendiri kolomnya.
         df = yf.download(
             ticker, 
             start="2024-01-01", 
             end=date.today() + timedelta(days=1), 
             progress=False,
-            auto_adjust=True,      # Penting: Mengambil harga Close yang sudah adjusted
-            multi_level_index=False # Penting: Mencegah kolom bertumpuk (fitur yfinance baru)
+            auto_adjust=False 
         )
     except Exception as e:
         print(f"Error download: {e}")
 
-    # --- LANGKAH 2: PAKSA FORMAT AGAR SESUAI ---
-    # Cek apakah download berhasil (tidak kosong)
+    # --- LANGKAH 2: BERSIHKAN & PAKSA FORMAT ---
+    is_data_valid = False
+    
     if df is not None and not df.empty:
-        
-        # Kadang yfinance bandel tetap kasih MultiIndex, kita ratakan paksa:
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-            
-        # Jika kolom namanya 'Adj Close', kita ubah jadi 'Close' biasa
-        if 'Adj Close' in df.columns:
-            df = df.rename(columns={'Adj Close': 'Close'})
-            
-        # Cek apakah sekarang kolom 'Close' sudah ada?
-        if 'Close' in df.columns:
-            # Berhasil! Kita rapikan strukturnya
-            df = df.reset_index() # Keluarkan Date dari index menjadi kolom
-            
-            # Pastikan nama kolom tanggal adalah 'Date'
-            if 'Date' not in df.columns and 'Datetime' in df.columns:
-                 df = df.rename(columns={'Datetime': 'Date'})
-            
-            # Bersihkan Timezone (UTC) agar jadi polosan
-            if 'Date' in df.columns:
-                df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+        # 1. Reset Index (Apapun indexnya, jadikan kolom biasa)
+        df = df.reset_index()
 
-            # SIMPAN DATA BARU KE BACKUP (Supaya besok-besok file csv terupdate)
+        # 2. Ratakan Nama Kolom (Handle MultiIndex / Tuples)
+        # Contoh: ('Close', 'ETH-USD') menjadi 'Close'
+        new_columns = []
+        for col in df.columns:
+            if isinstance(col, tuple):
+                # Ambil elemen yang mengandung kata 'Close', 'Date', atau 'Open'
+                # Jika tidak jelas, ambil elemen pertama
+                col_name = col[0] 
+            else:
+                col_name = str(col)
+            new_columns.append(col_name)
+        
+        df.columns = new_columns
+
+        # 3. Standardisasi Nama Kolom (RENAME PAKSA)
+        # Kita asumsikan kolom ke-0 setelah reset_index ADALAH Tanggal
+        df = df.rename(columns={df.columns[0]: 'Date'})
+
+        # Cari kolom yang namanya mirip "Close" atau "Adj Close"
+        found_close = False
+        for col in df.columns:
+            if 'Adj Close' in col:
+                df = df.rename(columns={col: 'Close'})
+                found_close = True
+                break
+            elif 'Close' in col:
+                # Sudah bernama Close, aman
+                found_close = True
+                break
+        
+        # 4. Validasi Akhir
+        if found_close and 'Date' in df.columns:
+            # Bersihkan Timezone
+            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+            
+            # Filter hanya kolom penting
+            df = df[['Date', 'Close']]
+            
+            # Simpan Backup Baru
             try:
                 df.to_csv("eth_backup.csv", index=False)
-                # st.success("✅ Data Yahoo Finance Berhasil Diupdate!") # Nyalakan jika ingin notifikasi
+                # Opsional: Beri notifikasi kecil kalau sukses update
+                # st.toast("Data terbaru berhasil diambil dari Yahoo Finance!", icon="✅") 
             except:
                 pass
-                
-            return df # KEMBALIKAN DATA ONLINE
             
-    # --- LANGKAH 3: JALAN BUNTU (BACKUP) ---
-    # Hanya jalan jika Langkah 2 gagal total
-    st.warning("⚠️ Mengambil data dari file backup lokal (eth_backup.csv).")
-    try:
-        df_backup = pd.read_csv("eth_backup.csv")
-        if "Date" in df_backup.columns:
-            df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-        return df_backup
-    except:
-        st.error("❌ Fatal: Data Online Gagal & File Backup Tidak Ada.")
-        return None
+            is_data_valid = True
+            return df
 
+    # --- LANGKAH 3: FALLBACK (BACKUP) ---
+    if not is_data_valid:
+        # Gunakan st.toast untuk notifikasi yang lebih elegan (muncul di pojok kanan bawah)
+        st.toast("Koneksi Yahoo lambat. Menggunakan data backup lokal.", icon="⚠️")
+        
+        try:
+            df_backup = pd.read_csv("eth_backup.csv")
+            
+            # Pastikan kolom Date dikenali
+            if "Date" in df_backup.columns:
+                df_backup["Date"] = pd.to_datetime(df_backup["Date"])
+            elif "Unnamed: 0" in df_backup.columns: 
+                # Kadang tersimpan dengan index tanpa nama
+                df_backup = df_backup.rename(columns={"Unnamed: 0": "Date"})
+                df_backup["Date"] = pd.to_datetime(df_backup["Date"])
+                
+            return df_backup
+        except:
+            st.error("❌ Fatal: Data Online Gagal & File Backup Tidak Ditemukan.")
+            return None
 
 def validate_scaler(scaler):
     """Validasi scaler agar konsisten dengan training."""
