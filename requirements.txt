@@ -1,0 +1,8 @@
+streamlit
+joblib
+pandas
+numpy
+scikit-learn
+tensorflow
+yfinance>=0.2.40
+matplotlib
