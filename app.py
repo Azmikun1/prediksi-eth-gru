@@ -80,64 +80,49 @@ html, body, [class*="css"]  { font-family: "Inter", "DejaVu Sans", sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
+
+# --- Fungsi-fungsi Bantuan ---
+
 @st.cache_data(ttl="1h") 
 def load_eth_data():
     """
-    Mengembalikan Tuple: (DataFrame, Status_Sumber)
+    Mengembalikan Tuple: (DataFrame, Status)
     Status: "online", "backup", atau "error"
     """
     ticker = "ETH-USD"
     df = None
-    source_status = "error" 
-
-    # --- LANGKAH 1: DOWNLOAD ONLINE ---
+    
+    # 1. COBA ONLINE
     try:
+        # auto_adjust=True -> Otomatis dapat Open, High, Low, Close, Volume yang bersih
         df = yf.download(
             ticker, 
-            start="2020-01-01", 
+            start="2020-01-01", # Saya set 2020 agar grafik historisnya panjang
             end=date.today() + timedelta(days=1), 
             progress=False,
-            auto_adjust=False 
+            auto_adjust=True,
+            multi_level_index=False 
         )
-        if df is not None and not df.empty:
-            source_status = "online"
-    except Exception as e:
-        print(f"Error download: {e}")
-
-    # --- LANGKAH 2: BERSIHKAN DATA ---
-    if source_status == "online":
-        # 1. Reset Index agar Date jadi kolom
-        df = df.reset_index()
-
-        # 2. Ratakan Nama Kolom (Handle MultiIndex)
-        new_columns = []
-        for col in df.columns:
-            # Jika kolom berupa tuple ('Close', 'ETH-USD'), ambil elemen pertamanya
-            col_name = col[0] if isinstance(col, tuple) else str(col)
-            new_columns.append(col_name)
-        df.columns = new_columns
-
-        # 3. Pastikan Kolom Pertama bernama 'Date'
-        df = df.rename(columns={df.columns[0]: 'Date'})
-
-        # 4. LOGIKA PRIORITAS: Pilih Salah Satu Saja
-        final_df = None
         
-        # PRIORITAS UTAMA: Cari kolom 'Close' asli
-        if 'Close' in df.columns and 'Date' in df.columns:
-            final_df = df[['Date', 'Close']].copy()
+        if df is not None and not df.empty:
+            # Bersihkan Index & Kolom
+            df = df.reset_index()
             
-        # PRIORITAS KEDUA (Cadangan): Cari 'Adj Close' jika 'Close' hilang
-        elif 'Adj Close' in df.columns and 'Date' in df.columns:
-            final_df = df[['Date', 'Adj Close']].copy()
-            final_df = final_df.rename(columns={'Adj Close': 'Close'})
+            # Handle jika kolom masih berupa Tuple/MultiIndex
+            new_cols = []
+            for col in df.columns:
+                col_name = col[0] if isinstance(col, tuple) else str(col)
+                new_cols.append(col_name)
+            df.columns = new_cols
+            
+            # Pastikan kolom pertama adalah Date
+            if 'Date' not in df.columns:
+                df = df.rename(columns={df.columns[0]: 'Date'})
 
-        # 5. Finalisasi
-        if final_df is not None:
-            df = final_df # Pakai dataframe yang sudah bersih
+            # Hapus Timezone
             df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-            
-            # Simpan Backup
+
+            # Simpan Backup (Timpa file lama agar fresh)
             try:
                 df.to_csv("eth_backup.csv", index=False)
             except:
@@ -145,17 +130,28 @@ def load_eth_data():
             
             return df, "online"
 
-    # --- LANGKAH 3: BACKUP (Jika Online Gagal) ---
+    except Exception as e:
+        print(f"Gagal Online: {e}")
+
+    # 2. COBA BACKUP (JIKA ONLINE GAGAL)
     try:
         df_backup = pd.read_csv("eth_backup.csv")
+        
+        # Bersihkan kolom sampah jika ada
+        if "Unnamed: 0" in df_backup.columns:
+            df_backup = df_backup.drop(columns=["Unnamed: 0"])
+            
+        # Pastikan kolom Date dikenali
         if "Date" in df_backup.columns:
             df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-        elif "Unnamed: 0" in df_backup.columns:
-            df_backup = df_backup.rename(columns={"Unnamed: 0": "Date"})
-            df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-            
+        elif df_backup.columns[0].lower() == "date":
+             df_backup = df_backup.rename(columns={df_backup.columns[0]: "Date"})
+             df_backup["Date"] = pd.to_datetime(df_backup["Date"])
+             
         return df_backup, "backup"
-    except:
+        
+    except FileNotFoundError:
+        # 3. GAGAL TOTAL
         return None, "error"
     
 def validate_scaler(scaler):
@@ -330,7 +326,7 @@ if data_source == "backup":
     st.toast("Koneksi Yahoo lambat. Menggunakan data backup lokal.", icon="⚠️")
 elif data_source == "error":
     st.error("❌ Gagal memuat data (Online gagal & Backup tidak ada).")
-
+    
 if df is not None and model is not None and scaler is not None:
     # Menampilkan tabel data historis
     st.markdown("<div class='card'>", unsafe_allow_html=True)
