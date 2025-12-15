@@ -80,109 +80,84 @@ html, body, [class*="css"]  { font-family: "Inter", "DejaVu Sans", sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# --- Fungsi-fungsi Bantuan ---
-
 @st.cache_data(ttl="1h") 
 def load_eth_data():
     """
-    Versi 'Bulletproof' (Anti-Gagal).
-    Memaksa kolom pertama jadi Date dan mencari kolom Close secara agresif.
+    Mengembalikan Tuple: (DataFrame, Status_Sumber)
+    Status: "online", "backup", atau "error"
     """
     ticker = "ETH-USD"
     df = None
-    
+    source_status = "error" 
+
     # --- LANGKAH 1: DOWNLOAD ONLINE ---
     try:
-        # Hapus parameter 'multi_level_index' karena kadang bikin error di versi lama.
-        # Kita pakai auto_adjust=False biar aman, nanti kita pilih sendiri kolomnya.
         df = yf.download(
             ticker, 
-            start="2024-01-01", 
+            start="2020-01-01", 
             end=date.today() + timedelta(days=1), 
             progress=False,
             auto_adjust=False 
         )
+        if df is not None and not df.empty:
+            source_status = "online"
     except Exception as e:
         print(f"Error download: {e}")
 
-    # --- LANGKAH 2: BERSIHKAN & PAKSA FORMAT ---
-    is_data_valid = False
-    
-    if df is not None and not df.empty:
-        # 1. Reset Index (Apapun indexnya, jadikan kolom biasa)
+    # --- LANGKAH 2: BERSIHKAN DATA ---
+    if source_status == "online":
+        # 1. Reset Index agar Date jadi kolom
         df = df.reset_index()
 
-        # 2. Ratakan Nama Kolom (Handle MultiIndex / Tuples)
-        # Contoh: ('Close', 'ETH-USD') menjadi 'Close'
+        # 2. Ratakan Nama Kolom (Handle MultiIndex)
         new_columns = []
         for col in df.columns:
-            if isinstance(col, tuple):
-                # Ambil elemen yang mengandung kata 'Close', 'Date', atau 'Open'
-                # Jika tidak jelas, ambil elemen pertama
-                col_name = col[0] 
-            else:
-                col_name = str(col)
+            # Jika kolom berupa tuple ('Close', 'ETH-USD'), ambil elemen pertamanya
+            col_name = col[0] if isinstance(col, tuple) else str(col)
             new_columns.append(col_name)
-        
         df.columns = new_columns
 
-        # 3. Standardisasi Nama Kolom (RENAME PAKSA)
-        # Kita asumsikan kolom ke-0 setelah reset_index ADALAH Tanggal
+        # 3. Pastikan Kolom Pertama bernama 'Date'
         df = df.rename(columns={df.columns[0]: 'Date'})
 
-        # Cari kolom yang namanya mirip "Close" atau "Adj Close"
-        found_close = False
-        for col in df.columns:
-            if 'Adj Close' in col:
-                df = df.rename(columns={col: 'Close'})
-                found_close = True
-                break
-            elif 'Close' in col:
-                # Sudah bernama Close, aman
-                found_close = True
-                break
+        # 4. LOGIKA PRIORITAS: Pilih Salah Satu Saja
+        final_df = None
         
-        # 4. Validasi Akhir
-        if found_close and 'Date' in df.columns:
-            # Bersihkan Timezone
+        # PRIORITAS UTAMA: Cari kolom 'Close' asli
+        if 'Close' in df.columns and 'Date' in df.columns:
+            final_df = df[['Date', 'Close']].copy()
+            
+        # PRIORITAS KEDUA (Cadangan): Cari 'Adj Close' jika 'Close' hilang
+        elif 'Adj Close' in df.columns and 'Date' in df.columns:
+            final_df = df[['Date', 'Adj Close']].copy()
+            final_df = final_df.rename(columns={'Adj Close': 'Close'})
+
+        # 5. Finalisasi
+        if final_df is not None:
+            df = final_df # Pakai dataframe yang sudah bersih
             df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
             
-            # Filter hanya kolom penting
-            df = df[['Date', 'Close']]
-            
-            # Simpan Backup Baru
+            # Simpan Backup
             try:
                 df.to_csv("eth_backup.csv", index=False)
-                # Opsional: Beri notifikasi kecil kalau sukses update
-                # st.toast("Data terbaru berhasil diambil dari Yahoo Finance!", icon="✅") 
             except:
                 pass
             
-            is_data_valid = True
-            return df
+            return df, "online"
 
-    # --- LANGKAH 3: FALLBACK (BACKUP) ---
-    if not is_data_valid:
-        # Gunakan st.toast untuk notifikasi yang lebih elegan (muncul di pojok kanan bawah)
-        st.toast("Koneksi Yahoo lambat. Menggunakan data backup lokal.", icon="⚠️")
-        
-        try:
-            df_backup = pd.read_csv("eth_backup.csv")
+    # --- LANGKAH 3: BACKUP (Jika Online Gagal) ---
+    try:
+        df_backup = pd.read_csv("eth_backup.csv")
+        if "Date" in df_backup.columns:
+            df_backup["Date"] = pd.to_datetime(df_backup["Date"])
+        elif "Unnamed: 0" in df_backup.columns:
+            df_backup = df_backup.rename(columns={"Unnamed: 0": "Date"})
+            df_backup["Date"] = pd.to_datetime(df_backup["Date"])
             
-            # Pastikan kolom Date dikenali
-            if "Date" in df_backup.columns:
-                df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-            elif "Unnamed: 0" in df_backup.columns: 
-                # Kadang tersimpan dengan index tanpa nama
-                df_backup = df_backup.rename(columns={"Unnamed: 0": "Date"})
-                df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-                
-            return df_backup
-        except:
-            st.error("❌ Fatal: Data Online Gagal & File Backup Tidak Ditemukan.")
-            return None
-
+        return df_backup, "backup"
+    except:
+        return None, "error"
+    
 def validate_scaler(scaler):
     """Validasi scaler agar konsisten dengan training."""
     issues = []
@@ -347,8 +322,14 @@ def create_combined_chart(df, start_date, future_dates, future_predictions):
 st.markdown("<div class='app-title'>Prediksi Harga Ethereum (GRU)</div>", unsafe_allow_html=True)
 st.markdown("<div class='app-subtitle'>Data historis & prediksi ETH-USD berbasis GRU</div>", unsafe_allow_html=True)
 
-df = load_eth_data()
+df, data_source = load_eth_data()
 model, scaler = load_gru_assets()
+
+# LOGIC UI (TOAST/WARNING) DITARUH DI SINI (DILUAR CACHE)
+if data_source == "backup":
+    st.toast("Koneksi Yahoo lambat. Menggunakan data backup lokal.", icon="⚠️")
+elif data_source == "error":
+    st.error("❌ Gagal memuat data (Online gagal & Backup tidak ada).")
 
 if df is not None and model is not None and scaler is not None:
     # Menampilkan tabel data historis
