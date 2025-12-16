@@ -94,10 +94,10 @@ def load_eth_data():
     
     # 1. COBA ONLINE
     try:
-        # auto_adjust=True -> Otomatis dapat Open, High, Low, Close, Volume yang bersih
+        
         df = yf.download(
             ticker, 
-            start="2024-01-01", # Saya set 2020 agar grafik historisnya panjang
+            start="2024-01-01", 
             end=date.today() + timedelta(days=1), 
             progress=False,
             auto_adjust=True,
