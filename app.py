@@ -85,69 +85,104 @@ html, body, [class*="css"]  { font-family: "Inter", "DejaVu Sans", sans-serif; }
 
 @st.cache_data(ttl="1h") 
 def load_eth_data():
+    """
+    Metode Hybrid (Tumpuk Data):
+    1. Baca Data Lama dari CSV.
+    2. Download Data Baru (dari tanggal terakhir CSV sampai Hari Ini).
+    3. Gabung (Concat) tanpa mengubah/mengisi data kosong.
+    """
     ticker = "ETH-USD"
-    df = None
+    df_final = None
     
-    # 1. COBA ONLINE
+    # --- BAGIAN 1: BACA DATA LAMA (BASE) ---
     try:
+        df_base = pd.read_csv("eth_backup.csv")
         
-        df = yf.download(
-            ticker, 
-            start="2024-01-01", 
-            end=date.today() + timedelta(days=1), 
-            progress=False,
-            auto_adjust=True,
-            multi_level_index=False 
-        )
+        # Bersihkan kolom sampah
+        if "Unnamed: 0" in df_base.columns:
+            df_base = df_base.drop(columns=["Unnamed: 0"])
         
-        if df is not None and not df.empty:
-            # Bersihkan Index & Kolom
-            df = df.reset_index()
-            
-            new_cols = []
-            for col in df.columns:
-                col_name = col[0] if isinstance(col, tuple) else str(col)
-                new_cols.append(col_name)
-            df.columns = new_cols
-            
-            # Pastikan kolom pertama adalah Date
-            if 'Date' not in df.columns:
-                df = df.rename(columns={df.columns[0]: 'Date'})
-
-            # Hapus Timezone
-            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-
-            # Simpan Backup (Timpa file lama agar fresh)
-            try:
-                df.to_csv("eth_backup.csv", index=False)
-            except:
-                pass
-            
-            return df, "online"
-
-    except Exception as e:
-        print(f"Gagal Online: {e}")
-
-    # 2. COBA BACKUP (JIKA ONLINE GAGAL)
-    try:
-        df_backup = pd.read_csv("eth_backup.csv")
+        # Standarisasi kolom Date
+        if "Date" not in df_base.columns:
+             # Cek kolom pertama
+             df_base = df_base.rename(columns={df_base.columns[0]: "Date"})
         
-        # Bersihkan kolom sampah jika ada
-        if "Unnamed: 0" in df_backup.columns:
-            df_backup = df_backup.drop(columns=["Unnamed: 0"])
-            
-        # Pastikan kolom Date dikenali
-        if "Date" in df_backup.columns:
-            df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-        elif df_backup.columns[0].lower() == "date":
-             df_backup = df_backup.rename(columns={df_backup.columns[0]: "Date"})
-             df_backup["Date"] = pd.to_datetime(df_backup["Date"])
-             
-        return df_backup, "backup"
+        df_base["Date"] = pd.to_datetime(df_base["Date"]).dt.tz_localize(None)
         
     except FileNotFoundError:
-        # 3. GAGAL TOTAL
-        return None, "error"
+        # Jika tidak ada file, buat dataframe kosong
+        df_base = pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+
+    # --- BAGIAN 2: DOWNLOAD DATA BARU (INCREMENTAL) ---
+    today = date.today()
+    
+    # Tentukan tanggal mulai download (Lanjutkan dari data terakhir di CSV)
+    if not df_base.empty:
+        last_date_csv = df_base["Date"].max()
+        start_download = last_date_csv + timedelta(days=1)
+    else:
+        start_download = pd.to_datetime("2020-01-01")
+
+    # Hanya download jika ada selisih hari
+    if start_download.date() <= today:
+        try:
+            # Download dari tanggal terakhir CSV s/d Hari Ini
+            df_new = yf.download(
+                ticker, 
+                start=start_download, 
+                end=today + timedelta(days=1), 
+                progress=False,
+                auto_adjust=True,
+                multi_level_index=False 
+            )
+            
+            if df_new is not None and not df_new.empty:
+                df_new = df_new.reset_index()
+                
+                # Rapikan kolom (Hapus MultiIndex jika ada)
+                new_cols = []
+                for col in df_new.columns:
+                    col_name = col[0] if isinstance(col, tuple) else str(col)
+                    new_cols.append(col_name)
+                df_new.columns = new_cols
+                
+                # Pastikan kolom Date benar
+                if 'Date' not in df_new.columns:
+                    df_new = df_new.rename(columns={df_new.columns[0]: 'Date'})
+                
+                df_new['Date'] = pd.to_datetime(df_new['Date']).dt.tz_localize(None)
+                
+                # --- BAGIAN 3: GABUNGKAN (CONCAT) ---
+                # Tumpuk data lama (Base) dengan data baru (New)
+                df_final = pd.concat([df_base, df_new], ignore_index=True)
+                
+            else:
+                # Jika download kosong (misal libur/gagal), pakai data lama saja
+                df_final = df_base
+                
+        except Exception as e:
+            print(f"Gagal update online: {e}")
+            df_final = df_base # Jika error, tetap tampilkan data lama (Safety Net)
+    else:
+        # Data CSV sudah paling update
+        df_final = df_base
+
+    # --- FINALISASI ---
+    if df_final is not None and not df_final.empty:
+        # Hapus duplikat (jika ada irisan tanggal)
+        df_final = df_final.drop_duplicates(subset="Date", keep="last")
+        
+        # Urutkan berdasarkan tanggal
+        df_final = df_final.sort_values("Date").reset_index(drop=True)
+        
+        # Filter hanya kolom standar (buang kolom sampah)
+        target_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        available = [c for c in target_cols if c in df_final.columns]
+        df_final = df_final[available]
+
+        return df_final, "mixed" # Status mixed (Gabungan)
+
+    return None, "error"
     
 def validate_scaler(scaler):
     """Validasi scaler agar konsisten dengan training."""
