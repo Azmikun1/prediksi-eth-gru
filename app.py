@@ -121,7 +121,7 @@ def load_eth_data():
         last_date_csv = df_base["Date"].max()
         start_download = last_date_csv + timedelta(days=1)
     else:
-        start_download = pd.to_datetime("2020-01-01")
+        start_download = pd.to_datetime("2024-01-01")
 
     # Hanya download jika ada selisih hari
     if start_download.date() <= today:
