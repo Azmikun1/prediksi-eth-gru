@@ -85,10 +85,6 @@ html, body, [class*="css"]  { font-family: "Inter", "DejaVu Sans", sans-serif; }
 
 @st.cache_data(ttl="1h") 
 def load_eth_data():
-    """
-    Mengembalikan Tuple: (DataFrame, Status)
-    Status: "online", "backup", atau "error"
-    """
     ticker = "ETH-USD"
     df = None
     
@@ -108,7 +104,6 @@ def load_eth_data():
             # Bersihkan Index & Kolom
             df = df.reset_index()
             
-            # Handle jika kolom masih berupa Tuple/MultiIndex
             new_cols = []
             for col in df.columns:
                 col_name = col[0] if isinstance(col, tuple) else str(col)
