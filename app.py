@@ -86,10 +86,7 @@ html, body, [class*="css"]  { font-family: "Inter", "DejaVu Sans", sans-serif; }
 @st.cache_data(ttl="1h") 
 def load_eth_data():
     """
-    Metode Hybrid (Tumpuk Data):
-    1. Baca Data Lama dari CSV.
-    2. Download Data Baru (dari tanggal terakhir CSV sampai Hari Ini).
-    3. Gabung (Concat) tanpa mengubah/mengisi data kosong.
+    Metode Hybrid (Tumpuk Data) dengan Debug Info.
     """
     ticker = "ETH-USD"
     df_final = None
@@ -104,29 +101,33 @@ def load_eth_data():
         
         # Standarisasi kolom Date
         if "Date" not in df_base.columns:
-             # Cek kolom pertama
              df_base = df_base.rename(columns={df_base.columns[0]: "Date"})
         
         df_base["Date"] = pd.to_datetime(df_base["Date"]).dt.tz_localize(None)
         
     except FileNotFoundError:
-        # Jika tidak ada file, buat dataframe kosong
         df_base = pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
-    # --- BAGIAN 2: DOWNLOAD DATA BARU (INCREMENTAL) ---
+    # --- BAGIAN 2: HITUNG TANGGAL DOWNLOAD ---
     today = date.today()
     
-    # Tentukan tanggal mulai download (Lanjutkan dari data terakhir di CSV)
     if not df_base.empty:
         last_date_csv = df_base["Date"].max()
         start_download = last_date_csv + timedelta(days=1)
     else:
-        start_download = pd.to_datetime("2024-01-01")
+        start_download = pd.to_datetime("2020-01-01")
+        last_date_csv = "Kosong"
 
-    # Hanya download jika ada selisih hari
+    # DEBUG INFO DI SIDEBAR (Supaya kelihatan prosesnya)
+    with st.sidebar:
+        st.write(f"📂 **Status Data:**")
+        st.write(f"- Terakhir di CSV: `{str(last_date_csv).split()[0]}`")
+        st.write(f"- Target Download: `{str(start_download.date())}` s.d `{today}`")
+
+    # --- BAGIAN 3: DOWNLOAD & GABUNG ---
+    # Hanya download jika tanggal download <= hari ini
     if start_download.date() <= today:
         try:
-            # Download dari tanggal terakhir CSV s/d Hari Ini
             df_new = yf.download(
                 ticker, 
                 start=start_download, 
@@ -139,48 +140,45 @@ def load_eth_data():
             if df_new is not None and not df_new.empty:
                 df_new = df_new.reset_index()
                 
-                # Rapikan kolom (Hapus MultiIndex jika ada)
+                # Rapikan kolom
                 new_cols = []
                 for col in df_new.columns:
                     col_name = col[0] if isinstance(col, tuple) else str(col)
                     new_cols.append(col_name)
                 df_new.columns = new_cols
                 
-                # Pastikan kolom Date benar
                 if 'Date' not in df_new.columns:
                     df_new = df_new.rename(columns={df_new.columns[0]: 'Date'})
                 
                 df_new['Date'] = pd.to_datetime(df_new['Date']).dt.tz_localize(None)
                 
-                # --- BAGIAN 3: GABUNGKAN (CONCAT) ---
-                # Tumpuk data lama (Base) dengan data baru (New)
+                # INFO DEBUG
+                st.sidebar.success(f"✅ Berhasil download {len(df_new)} hari baru!")
+                
+                # GABUNGKAN
                 df_final = pd.concat([df_base, df_new], ignore_index=True)
                 
             else:
-                # Jika download kosong (misal libur/gagal), pakai data lama saja
+                st.sidebar.warning("⚠️ Download dijalankan tapi data kosong (Mungkin libur/belum close).")
                 df_final = df_base
                 
         except Exception as e:
-            print(f"Gagal update online: {e}")
-            df_final = df_base # Jika error, tetap tampilkan data lama (Safety Net)
+            st.sidebar.error(f"❌ Gagal update online: {e}")
+            df_final = df_base 
     else:
-        # Data CSV sudah paling update
+        st.sidebar.info("✅ Data CSV sudah paling update.")
         df_final = df_base
 
     # --- FINALISASI ---
     if df_final is not None and not df_final.empty:
-        # Hapus duplikat (jika ada irisan tanggal)
         df_final = df_final.drop_duplicates(subset="Date", keep="last")
-        
-        # Urutkan berdasarkan tanggal
         df_final = df_final.sort_values("Date").reset_index(drop=True)
         
-        # Filter hanya kolom standar (buang kolom sampah)
         target_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
         available = [c for c in target_cols if c in df_final.columns]
         df_final = df_final[available]
 
-        return df_final, "mixed" # Status mixed (Gabungan)
+        return df_final, "mixed"
 
     return None, "error"
     
