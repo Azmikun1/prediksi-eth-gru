@@ -14,7 +14,7 @@ print(f"Tanggal mulai: {start_date}")
 print("-" * 30)
 
 try:
-    # Kita akan mencoba mengunduh data dengan cara yang paling dasar
+    # Kita akan mencoba mengunduh data 
     data = yf.download(
         tickers=ticker_symbol,
         start=start_date,

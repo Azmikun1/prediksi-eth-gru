@@ -110,7 +110,7 @@ def load_eth_data():
                 new_cols.append(col_name)
             df.columns = new_cols
             
-            # Pastikan kolom pertama adalah Date
+            # Kolom pertama adalah Date
             if 'Date' not in df.columns:
                 df = df.rename(columns={df.columns[0]: 'Date'})
 
@@ -253,10 +253,7 @@ def create_combined_chart(df, start_date, future_dates, future_predictions):
 
     fig, ax = plt.subplots(figsize=(14, 8))
 
-    ax.plot(
-        recent_df["Date"], recent_df["Close"],
-        color="gray", linewidth=1.0, label="Harga Aktual (Harian)", alpha=0.5
-    )
+    
     ax.plot(
         recent_df["Date"], recent_df["Trend_Aktual"],
         color="#1f77b4", linewidth=2.5, label="Tren Harga Aktual", alpha=0.9
