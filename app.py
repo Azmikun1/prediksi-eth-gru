@@ -258,10 +258,20 @@ def create_combined_chart(df, start_date, future_dates, future_predictions):
         recent_df["Date"], recent_df["Trend_Aktual"],
         color="#1f77b4", linewidth=2.5, label="Tren Harga Aktual", alpha=0.9
     )
+    # Membuat tren prediksi menggunakan moving average 7 hari
+    pred_trend = (
+        pd.Series(predictions_flat)
+        .rolling(window=7, min_periods=1)
+        .mean()
+    )
+
     ax.plot(
-        future_dates, predictions_flat,
-        color="#d62728", linewidth=2.5, label="Harga Prediksi (GRU)",
-        alpha=0.9, marker="o", markersize=4
+        future_dates,
+        pred_trend,
+        color="#d62728",
+        linewidth=2.5,
+        label="Tren Harga Prediksi (GRU)",
+        alpha=0.9
     )
     ax.scatter(
         recent_df["Date"], recent_df["Close"],
