@@ -243,7 +243,7 @@ def predict_from_sequence_pure(model, initial_sequence_scaled, n_days):
 
 def create_combined_chart(df, start_date, future_dates, future_predictions):
     """Membuat grafik gabungan dengan gaya yang sama seperti referensi."""
-    context_start_date = start_date - timedelta(days=60)
+    context_start_date = start_date - timedelta(days=609)
     recent_df = df[(df["Date"] >= context_start_date) & (df["Date"] <= start_date)].copy()
 
     window_size = 7
