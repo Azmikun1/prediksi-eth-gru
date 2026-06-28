@@ -415,6 +415,39 @@ if df is not None and model is not None and scaler is not None:
             st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("<div class='card'>", unsafe_allow_html=True)
+            
+            #Test 
+            st.subheader("📈 Grafik Detail Prediksi")
+
+            fig2, ax2 = plt.subplots(figsize=(12, 5))
+
+            ax2.plot(
+                future_dates,
+                future_predictions.flatten(),
+                marker='o',
+                linewidth=2.5
+            )
+
+            ax2.set_title(
+                "Grafik Detail Hasil Prediksi Harga Ethereum",
+                fontsize=14,
+                fontweight="bold"
+            )
+
+            ax2.set_xlabel("Tanggal")
+            ax2.set_ylabel("Harga Prediksi (USD)")
+
+            ax2.grid(True, alpha=0.3)
+
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+
+            st.pyplot(fig2)
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+
             st.subheader("🧾 Tabel Detail Prediksi")
             prediction_table_df = pd.DataFrame({
                 "Tanggal": [d.strftime("%Y-%m-%d") for d in future_dates],
